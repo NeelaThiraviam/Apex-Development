@@ -1,0 +1,125 @@
+trigger ProspectRecordConvertPersonAccount on Prospect__c (after update) {
+    
+    Set<Id> insertId = new Set<Id>();
+    
+    for (Prospect__c prospect: Trigger.new) {
+        insertId.add(prospect.Id);
+    }
+    
+    Map<Id,Account> mapIds = new Map<Id,Account>();
+    
+    for (Account account: [SELECT Id,Prospect__c FROM Account WHERE Prospect__c =:insertId]) {
+        mapIds.put(account.Prospect__c,account);
+    }
+    
+    List<sObject> accData = new List<sObject>();
+    List<sObject> conData = new List<sObject>();
+    List<sObject> oppData = new List<sObject>();
+    List<Account> accList = new List<Account>();
+    List<Contact> conList = new List<Contact>();
+    List<Opportunity> oppList = new List<Opportunity>();
+    List<Contact> conUpdate = new List<Contact>();
+    Id accountId;
+    
+    if (Trigger.isAfter && Trigger.isUpdate) {
+        for (Prospect__c prospect: Trigger.new) {
+            if (prospect.Status__c != null && prospect.Status__c == 'Closed - Converted' && prospect.Status__c != Trigger.oldMap.get(prospect.Id).Status__c 
+                && prospect.FirstName__c != null && prospect.LastName__c != null && prospect.Company__c != null && !mapIds.containsKey(prospect.Id)) {
+                    
+                    Account account = new Account();
+                    account.FirstName = prospect.FirstName__c;
+                    account.LastName = prospect.LastName__c;
+                    account.AccountSource = prospect.Lead_Source__c;
+                    account.AnnualRevenue = prospect.AnnualRevenue__c;
+                    account.Description = prospect.Description__c;
+                    account.Email__c = prospect.Email__c;
+                    account.Industry = prospect.Industry__c;
+                    account.Phone = prospect.Phone__c;
+                    account.Rating = prospect.Rating__c;
+                    account.Website = prospect.Website__c;
+                    account.Prospect__c = prospect.Id;
+                    accList.add(account);
+                    
+                    Contact contact = new Contact();
+                    contact.FirstName = prospect.FirstName__c;
+                    contact.LastName = prospect.LastName__c;
+                    contact.Email = prospect.Email__c;
+                    contact.Gender__c = prospect.Gender_Identity__c;
+                    contact.Phone = prospect.Phone__c;
+                    contact.Title = prospect.Title__c;
+                    contact.Description = prospect.Description__c;
+                    contact.Prospect__c = prospect.Id;
+                    conList.add(contact);
+                    
+                    Opportunity opportunity = new Opportunity();
+                    opportunity.Name = prospect.Name;
+                    opportunity.CloseDate = prospect.Close_Date__c;
+                    opportunity.LeadSource = prospect.Lead_Source__c;
+                    opportunity.StageName = 'Prospecting';
+                    opportunity.Description = prospect.Description__c;
+                    opportunity.Prospect__c = prospect.Id;
+                    oppList.add(opportunity);
+                }
+            else if (prospect.Status__c != null && prospect.Status__c == 'Closed - Converted' && prospect.Status__c != Trigger.oldMap.get(prospect.Id).Status__c 
+                     && prospect.FirstName__c != null && prospect.LastName__c != null && prospect.Company__c == null && !mapIds.containsKey(prospect.Id)) {
+                         
+                         Account newPersonAccount = new Account();
+                         newPersonAccount.RecordTypeId = '0125j000000iz11AAA';
+                         newPersonAccount.FirstName = prospect.FirstName__c;
+                         newPersonAccount.LastName = prospect.LastName__c;
+                         newPersonAccount.Prospect__c = prospect.Id;
+                         newPersonAccount.AccountSource = prospect.Lead_Source__c;
+                         newPersonAccount.AnnualRevenue = prospect.AnnualRevenue__c;
+                         newPersonAccount.Description = prospect.Description__c;
+                         newPersonAccount.Email__c = prospect.Email__c;
+                         newPersonAccount.Industry = prospect.Industry__c;
+                         newPersonAccount.Phone = prospect.Phone__c;
+                         newPersonAccount.Rating = prospect.Rating__c;
+                         newPersonAccount.Website = prospect.Website__c;
+                         accList.add(newPersonAccount);
+                         
+                         Opportunity opportunity = new Opportunity();
+                         opportunity.Name = prospect.Name;
+                         opportunity.CloseDate = prospect.Close_Date__c;
+                         opportunity.LeadSource = prospect.Lead_Source__c;
+                         opportunity.StageName = 'Prospecting';
+                         opportunity.Description = prospect.Description__c;
+                         opportunity.Prospect__c = prospect.Id;
+                         oppList.add(opportunity);
+                     }
+        }
+        
+        if (!accList.isEmpty()) {
+            insert accList;
+            for (Account acc: accList) {
+                Prospect__c prospect = new Prospect__c();
+                prospect.Id = acc.Prospect__c;
+                prospect.AccountId__c = acc.Id;
+                accData.add(prospect);    
+            }
+        }
+        if (!conList.isEmpty()) {
+            insert conList;
+            for (Contact con: conList) { 
+                Prospect__c prospect = new Prospect__c();
+                prospect.Id = con.Prospect__c;
+                prospect.ContactId__c = con.Id;
+                conData.add(prospect);
+            }
+        }
+        if (!oppList.isEmpty()) {
+            insert oppList;
+            for (Opportunity opp: oppList) {
+                Prospect__c prospect = new Prospect__c();
+                prospect.Id = opp.Prospect__c;
+                prospect.OpportunityId__c = opp.Id;
+                oppData.add(prospect);
+            }
+        }
+        if (accData != null && conData != null && oppList != null && conUpdate != null) {
+            update accData;
+            update conData;
+            update oppData;
+        }
+    }
+}
