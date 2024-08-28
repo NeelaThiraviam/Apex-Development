@@ -1,0 +1,54 @@
+public class AccountDuplicate {
+    
+    @InvocableMethod(label = 'MergeAccount')
+    public static void accountDuplicateMerge(List<AccountMergeWrapper> accountWrappers) {
+        System.debug(accountWrappers);
+        
+        Set<Id> allMasterIds = new Set<Id>();
+        Set<Id> allChildIds = new Set<Id>();
+        
+        for (AccountMergeWrapper wrapper : accountWrappers) {
+            allMasterIds.addAll(wrapper.masterIds);
+            
+            if (String.isNotBlank(wrapper.childIds)) {
+                for (String idStr : wrapper.childIds.split(';')) {
+                    allChildIds.add(Id.valueOf(idStr.trim()));
+                }
+            }
+        }
+        
+        Map<Id, Account> masterAccountsMap = new Map<Id, Account>([SELECT Id FROM Account WHERE Id IN :allMasterIds]);
+        
+        Map<Id, Account> childAccountsMap = new Map<Id, Account>([SELECT Id FROM Account WHERE Id IN :allChildIds]);
+        
+        for (AccountMergeWrapper wrapper : accountWrappers) {
+            for (Id masterId : wrapper.masterIds) {
+                Account masterAccount = masterAccountsMap.get(masterId);
+                
+                if (masterAccount != null) {
+                    List<Id> childIdsList = new List<Id>();
+                    if (String.isNotBlank(wrapper.childIds)) {
+                        for (String idStr : wrapper.childIds.split(';')) {
+                            childIdsList.add(Id.valueOf(idStr.trim()));
+                        }
+                    }
+                    
+                    List<Account> childAccounts = new List<Account>();
+                    for (Id childId : childIdsList) {
+                        if (childAccountsMap.containsKey(childId)) {
+                            childAccounts.add(childAccountsMap.get(childId));
+                        }
+                    }
+                    
+                    for (Account childAccount : childAccounts) {
+                        try {
+                            Database.merge(masterAccount, childAccount);
+                        } catch (Exception e) {
+                            System.debug('Error merging account: ' + e.getMessage());
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
