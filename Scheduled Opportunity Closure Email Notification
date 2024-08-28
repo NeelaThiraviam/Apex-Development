@@ -1,0 +1,69 @@
+global class OpportunityClosureEmailScheduler implements Schedulable {
+
+    global void execute(SchedulableContext sc) {
+        oppClosedataBatchable oppBatch = new oppClosedataBatchable();
+        Database.executeBatch(oppBatch);
+    }
+}
+
+
+public class oppClosedataBatchable implements Database.Batchable<sObject> {
+
+    public Database.QueryLocator start(Database.BatchableContext bc) {
+        
+        String Query = 'SELECT Id, Name, StageName, Owner.Email, CloseDate, LeadSource, Amount FROM Opportunity WHERE CloseDate = TODAY AND (StageName = \'Closed Won\' OR StageName = \'Closed Lost\')';
+        
+        return Database.getQueryLocator(Query);
+        
+    }
+
+    public void execute(Database.BatchableContext bc, List<Opportunity> oppList) {
+        
+        List<User> userList = [SELECT Id, Email, Profile.Name 
+                               FROM User 
+                               WHERE Profile.Name = 'Test standard platform user' 
+                               LIMIT 1
+                              ];
+        
+        String email;
+        String htmlBody = '<h3>Opportunity Details</h3>';
+        String csvFileBody = 'Opportunity Id, Opportunity Name, Opportunity StageName\n';
+        
+        List<Messaging.SingleEmailMessage> mails = new List<Messaging.SingleEmailMessage>();
+        
+        for (Opportunity opp: oppList) {
+            csvFileBody = csvFileBody + opp.Id + opp.Name + opp.StageName + '\n';
+        }
+        
+        Messaging.EmailFileAttachment csvFile = new Messaging.EmailFileAttachment();
+        csvFile.setFileName('OpportunityData.csv');
+        csvFile.setBody(blob.valueOf(csvFileBody));
+
+        for (Opportunity opp: oppList) {
+            email = opp.Owner.Email;
+            htmlBody += '<html><body>';
+            htmlBody += '<table border="1" bgColor = "green">';
+            htmlBody = '<tr><th>Opportunity Name</th><th>Stage Name</th><th>Close Date</th><th>Lead Source</th><th>Amount</th></tr>';
+            htmlBody += '<tr><td>' + opp.Name + '</td><td>' + opp.StageName + '</td><td>' + opp.CloseDate + '</td><td>' + opp.LeadSource + '</td><td>' + opp.Amount + '</td></tr>';
+            htmlBody += '</table>';
+            htmlBody += '</body></html>';
+
+            for (User user : userList) {
+                if (user.Email == email) {
+                    Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+                    mail.setToAddresses(new String[]{user.Email});
+                    mail.setSubject('Opportunity Details');
+                    mail.setHtmlBody(htmlBody);
+                    mail.setFileAttachments(new List<Messaging.EmailFileAttachment>{csvFile});
+                    mails.add(mail);
+                    break;
+                }
+            }
+        }
+        Messaging.sendEmail(mails);
+    }
+
+    public void finish(Database.BatchableContext bc) {
+        
+    }
+}
