@@ -1,0 +1,76 @@
+trigger OpportunityStageTrigger on Opportunity (after insert, after update, after delete) {
+    
+    if (Trigger.isInsert || Trigger.isUpdate) {
+        OpportunityStageCountInClass.opportunityStageIncrease(Trigger.new);
+    }
+    
+    if (Trigger.isDelete) {
+        OpportunityStageCountInClass.opportunityStageDecrease(Trigger.old);
+    }
+}
+
+
+public class OpportunityStageCountInClass {
+    Public static void opportunityStageIncrease(List<Opportunity> oppNew) {
+        Map<Id,Map<String,Integer>> stageCount = new Map<Id,Map<String,Integer>>();
+        Id accountId;
+        for (Opportunity opp: oppNew) {
+            if (opp.AccountId != null && opp.StageName != null) {
+                accountId = opp.AccountId;
+                stageCount.put(accountId,new Map<String,Integer>());
+                System.debug(accountId);
+                System.debug(stageCount);
+            }
+        }
+        for (Opportunity oppRec: [SELECT Id,StageName,AccountId FROM Opportunity WHERE AccountId =:accountId]) {
+            Map<String,Integer> stageCounts = stageCount.get(accountId);
+            System.debug(stageCounts);
+            if (oppRec.StageName != null && oppRec.AccountId != null) {
+                if (stageCounts.containsKey(oppRec.StageName)) {
+                    stageCounts.put(oppRec.StageName,stageCounts.get(oppRec.StageName) +1);
+                } else {
+                    stageCounts.put(oppRec.StageName,1);
+                }
+            }
+        }
+        opportunityStageAccountDescriptionUpdate(stageCount);
+    }
+    public static void opportunityStageDecrease(List<Opportunity> oppOld) {
+        Map<Id,Map<String,Integer>> stageCount = new Map<Id,Map<String,Integer>>();
+        Id accountId;
+        for (Opportunity opp: oppOld) {
+            if (opp.StageName != null && opp.AccountId != null) {
+                accountId = opp.AccountId;
+                stageCount.put(accountId,new Map<String,Integer>());
+            }
+        }
+        for (Opportunity oppRec: [SELECT Id,StageName,AccountId FROM Opportunity WHERE AccountId =:accountId]) {
+            Map<String,Integer> stageCounts = stageCount.get(accountId);
+            if (oppRec.StageName != null && oppRec.AccountId != null) {
+                if (stageCounts.containsKey(oppRec.StageName)) { 
+                    stageCounts.put(oppRec.StageName,stageCounts.get(oppRec.StageName) +1);
+                } else {
+                    stageCounts.put(oppRec.StageName, 1);
+                }
+            }
+        }
+        opportunityStageAccountDescriptionUpdate(stageCount);
+    }
+    public static void opportunityStageAccountDescriptionUpdate(Map<Id,Map<String,Integer>> stageCount) {
+        List<Account> accList = new List<Account>();
+        for (Id accountId: stageCount.keySet()) {
+            Account acc = new Account();
+            acc.Id = accountId;
+            String newDescription = '';
+            Map<String,Integer> stageCounts = stageCount.get(accountId);
+            for (String stageName: stageCounts.keySet()) {
+                newDescription += stageName +':'+ stageCounts.get(stageName)+'\n';
+            }
+            acc.Description = newDescription;
+            accList.add(acc);
+        }
+        if (accList.isEmpty() == False) {
+            update accList;
+        }
+    }
+}
