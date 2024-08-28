@@ -1,0 +1,72 @@
+trigger ParentToChildUpdate on Account (after update) {
+    if (Trigger.isAfter && Trigger.isUpdate && TriggerPrevent.firstRun) {
+        
+        TriggerPrevent.firstRun = false;
+        
+        Set<Id> parentAccountIds = new Set<Id>();
+        
+        for (Account account : Trigger.new) {
+            if (account.BillingStreet != Trigger.oldMap.get(account.Id).BillingStreet ||
+                account.BillingCity != Trigger.oldMap.get(account.Id).BillingCity ||
+                account.BillingState != Trigger.oldMap.get(account.Id).BillingState ||
+                account.BillingPostalCode != Trigger.oldMap.get(account.Id).BillingPostalCode ||
+                account.BillingCountry != Trigger.oldMap.get(account.Id).BillingCountry) {
+                    parentAccountIds.add(account.Id);
+                }
+        }
+        System.debug(parentAccountIds);
+        
+        if (!parentAccountIds.isEmpty()) {
+            
+            List<Account> childAccounts = [
+                SELECT Id, 
+                ParentId, 
+                Parent.ParentId,
+                Parent.Parent.ParentId,
+                Parent.Parent.Parent.ParentId,                
+                Parent.Parent.Parent.Parent.ParentId
+                FROM Account 
+                WHERE ParentId IN :parentAccountIds 
+                OR Parent.ParentId IN :parentAccountIds 
+                OR Parent.Parent.ParentId IN :parentAccountIds 
+                OR Parent.Parent.Parent.ParentId IN :parentAccountIds 
+                OR Parent.Parent.Parent.Parent.ParentId IN :parentAccountIds
+            ];
+            System.debug(childAccounts);
+            
+            List<Account> accountsToUpdate = new List<Account>();
+            
+            for (Account childAccount : childAccounts) {
+                System.debug(childAccount);
+                Account parentAccount;
+                
+                if (childAccount.ParentId != null && parentAccountIds.contains(childAccount.ParentId)) {
+                    parentAccount = Trigger.newMap.get(childAccount.ParentId);
+                } else if (childAccount.Parent.ParentId != null && parentAccountIds.contains(childAccount.Parent.ParentId)) {
+                    parentAccount = Trigger.newMap.get(childAccount.Parent.ParentId);
+                } else if (childAccount.Parent.Parent.ParentId != null && parentAccountIds.contains(childAccount.Parent.Parent.ParentId)) {
+                    parentAccount = Trigger.newMap.get(childAccount.Parent.Parent.ParentId);
+                } else if (childAccount.Parent.Parent.Parent.ParentId != null && parentAccountIds.contains(childAccount.Parent.Parent.Parent.ParentId)) {
+                    parentAccount = Trigger.newMap.get(childAccount.Parent.Parent.Parent.ParentId);
+                } else if (childAccount.Parent.Parent.Parent.Parent.ParentId != null && parentAccountIds.contains(childAccount.Parent.Parent.Parent.Parent.ParentId)) {
+                    parentAccount = Trigger.newMap.get(childAccount.Parent.Parent.Parent.Parent.ParentId);
+                }
+                
+                if (parentAccount != null && parentAccount.ParentId == null) {
+                    childAccount.BillingStreet = parentAccount.BillingStreet;
+                    childAccount.BillingCity = parentAccount.BillingCity;
+                    childAccount.BillingState = parentAccount.BillingState;
+                    childAccount.BillingPostalCode = parentAccount.BillingPostalCode;
+                    childAccount.BillingCountry = parentAccount.BillingCountry;
+                    
+                    accountsToUpdate.add(childAccount);
+                }                
+            }
+            
+            if (!accountsToUpdate.isEmpty()) {
+                update accountsToUpdate;
+                System.debug(accountsToUpdate);
+            }
+        }
+    }
+}
