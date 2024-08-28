@@ -1,3 +1,11 @@
+public class AccountMergeWrapper {
+    @InvocableVariable
+    public List<Id> masterIds;
+    
+    @InvocableVariable
+    public String childIds;
+}
+
 public class AccountDuplicate {
     
     @InvocableMethod(label = 'MergeAccount')
