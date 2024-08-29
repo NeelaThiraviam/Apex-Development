@@ -1,0 +1,65 @@
+public class AccountIdAutolaunch {
+
+    @InvocableVariable(required=true)
+    public Id accountId;
+}
+
+public class OpportunityBatchInvoker {
+    @InvocableMethod(label='Invoke Opportunity')
+    public static void invokeBatch(List<AccountIdAutolaunch> accountIdList) {
+        System.debug(accountIdList);
+        List<Id> accountIds = new List<Id>();
+
+        for (AccountIdAutolaunch item : accountIdList) {
+            accountIds.add(item.accountId);
+        }
+
+        OpportunityEmailBatch batch = new OpportunityEmailBatch(accountIds);
+        System.debug(batch);
+        Database.executeBatch(batch);
+    }
+}
+
+public class OpportunityEmailBatch implements Database.Batchable<SObject> {
+    
+    private List<Id> accountIds;
+
+    public OpportunityEmailBatch(List<Id> accountIds) {
+        this.accountIds = accountIds;
+    }
+
+    public Database.QueryLocator start(Database.BatchableContext bc) {
+        return Database.getQueryLocator([SELECT Id FROM Account WHERE Id IN :accountIds]);
+    }
+
+    public void execute(Database.BatchableContext bc, List<Account> scope) {
+        System.debug(scope);
+        
+        String htmlBody = '<h2>The account has a list of opportunities shown below:</h2>';
+        List<Messaging.SingleEmailMessage> mails = new List<Messaging.SingleEmailMessage>();
+
+        for (Opportunity opp : [SELECT Id, AccountId, Name, StageName, CloseDate, LeadSource, Amount 
+                                FROM Opportunity WHERE AccountId IN :scope]) {
+
+            htmlBody += '<html><body>';
+            htmlBody += '<table border="1" bgColor="#ADD8E6">';
+            htmlBody = '<tr><th>Opportunity Name</th><th>Stage Name</th><th>Close Date</th><th>Lead Source</th><th>Amount</th></tr>';
+            htmlBody += '<tr><td>' + opp.Name + '</td><td>' + opp.StageName + '</td><td>' + opp.CloseDate + '</td><td>' + opp.LeadSource + '</td><td>' + opp.Amount + '</td></tr>';
+            htmlBody += '</table>';
+            htmlBody += '</body></html>';           
+        }
+        
+        for (Account accountMail : [SELECT Id, Email__c FROM Account WHERE Id IN :scope]) {
+            Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+            mail.setToAddresses(new String[]{accountMail.Email__c});
+            mail.setSubject('Opportunity Records');
+            mail.setHtmlBody(htmlBody);
+            mails.add(mail);
+        }
+        Messaging.sendEmail(mails);
+    }
+
+    public void finish(Database.BatchableContext bc) {
+        
+    }
+}
