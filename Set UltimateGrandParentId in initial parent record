@@ -1,0 +1,41 @@
+trigger GrandParentIdInAccount on Account (before update) { 
+    
+    if (Trigger.isBefore && Trigger.isUpdate) {
+        
+        Set<Id> parentId_Set = new Set<Id>();
+        
+        for (Account account : Trigger.new) {
+            parentId_Set.add(account.ParentId);
+        }
+        System.debug(parentId_Set);
+        
+        Map<Id, Id> acc_ParentId_In_Map = new Map<Id, Id>();
+        
+        for (Account account : [SELECT Id, ParentId, Parent.ParentId, Parent.Parent.ParentId, Parent.Parent.Parent.ParentId, Parent.Parent.Parent.Parent.ParentId
+                               FROM Account
+                               WHERE Id IN :parentId_Set]) {
+                                   System.debug(account);
+            
+            acc_ParentId_In_Map.put(account.Id, account.Parent.Parent.Parent.Parent.ParentId);
+            
+            if (account.Parent.Parent.Parent.ParentId != null) {
+                acc_ParentId_In_Map.put(account.Id, account.Parent.Parent.Parent.ParentId);
+            } else if (account.Parent.Parent.ParentId != null) {
+                acc_ParentId_In_Map.put(account.Id, account.Parent.Parent.ParentId);
+            } else if (account.Parent.ParentId != null) {
+                acc_ParentId_In_Map.put(account.Id, account.Parent.ParentId);
+            } else if (account.ParentId != null) {
+                acc_ParentId_In_Map.put(account.Id, account.ParentId);
+            }
+        }
+        System.debug(acc_ParentId_In_Map);
+        
+        for (Account account : Trigger.new) {
+            
+            if (acc_ParentId_In_Map.containsKey(account.ParentId)) {
+                account.AccountId__c = acc_ParentId_In_Map.get(account.ParentId);
+                System.debug(account.AccountId__c);
+            }
+        }
+    }
+}
