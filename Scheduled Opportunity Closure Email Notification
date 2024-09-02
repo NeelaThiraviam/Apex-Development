@@ -67,3 +67,111 @@ public class oppClosedataBatchable implements Database.Batchable<sObject> {
         
     }
 }
+-------------------------------------------------------------------------------------------------------------------------------------------
+public class AccountIdAutolaunch {
+
+    @InvocableVariable(required=true)
+    public Id accountId;
+    
+    @InvocableVariable(required=true)
+    public String sObj;
+}
+
+public class OpportunityBatchInvoker {
+    @InvocableMethod(label='Invoke Opportunity')
+    public static void invokeBatch(List<AccountIdAutolaunch> accountIdList) {
+        System.debug(accountIdList);
+        List<Id> accountIds = new List<Id>();
+        List<String> sObjList = new List<String>();
+
+        for (AccountIdAutolaunch item : accountIdList) {
+            accountIds.add(item.accountId);
+            sObjList.add(item.sObj);
+        }
+
+        OpportunityEmailBatch batch = new OpportunityEmailBatch(accountIds, sObjList);
+        System.debug(batch);
+        Database.executeBatch(batch);
+    }
+}
+
+public class OpportunityEmailBatch implements Database.Batchable<SObject> {
+    
+    private List<Id> accountIds;
+    private List<String> sObjList;
+
+    public OpportunityEmailBatch(List<Id> accountIds, List<String> sObjList) {
+        this.accountIds = accountIds;
+        this.sObjList = sObjList;
+    }
+
+    public Database.QueryLocator start(Database.BatchableContext bc) {
+        
+        String query = 'SELECT Id FROM Account WHERE Id IN :accountIds';
+        return Database.getQueryLocator(query);
+    }
+
+    public void execute(Database.BatchableContext bc, List<SObject> scope) {
+        System.debug(scope);
+
+        String htmlBody = '<h2>' + scope + 'has a list of child records shown below:</h2>';
+        List<Messaging.SingleEmailMessage> mails = new List<Messaging.SingleEmailMessage>();
+
+        for (String sObjName : sObjList) {
+            String query = '';
+            if (sObjName == 'Opportunity') {
+                query = 'SELECT Id, AccountId, Name, StageName, CloseDate, LeadSource, Amount FROM ' + sObjName + ' WHERE AccountId IN :scope';
+            } else if (sObjName == 'Contact') {
+                query = 'SELECT Id, AccountId, FirstName, LastName, Email, Phone FROM ' + sObjName + ' WHERE AccountId IN :scope';
+            } else if (sObjName == 'Case') {
+                query = 'SELECT Id, AccountId, CaseNumber, Status, Priority, Subject FROM ' + sObjName + ' WHERE AccountId IN :scope';
+            }
+            
+            List<SObject> records = Database.query(query);
+
+            if (!records.isEmpty()) {
+                htmlBody += '<html><body>';
+                htmlBody += '<table border="1" bgColor="#ADD8E6">';
+
+                if (sObjName == 'Opportunity') {
+                    htmlBody += '<tr><th>Opportunity Name</th><th>Stage Name</th><th>Close Date</th><th>Lead Source</th><th>Amount</th></tr>';
+                } else if (sObjName == 'Contact') {
+                    htmlBody += '<tr><th>First Name</th><th>Last Name</th><th>Email</th><th>Phone</th></tr>';
+                } else if (sObjName == 'Case') {
+                    htmlBody += '<tr><th>Case Number</th><th>Status</th><th>Priority</th><th>Subject</th></tr>';
+                }
+
+                for (SObject record : records) {
+                    if (sObjName == 'Opportunity') {
+                        Opportunity opp = (Opportunity) record;
+                        htmlBody += '<tr><td>' + opp.Name + '</td><td>' + opp.StageName + '</td><td>' + opp.CloseDate + '</td><td>' + opp.LeadSource + '</td><td>' + opp.Amount + '</td></tr>';
+                    } else if (sObjName == 'Contact') {
+                        Contact contact = (Contact) record;
+                        htmlBody += '<tr><td>' + contact.FirstName + '</td><td>' + contact.LastName + '</td><td>' + contact.Email + '</td><td>' + contact.Phone + '</td></tr>';
+                    } else if (sObjName == 'Case') {
+                        Case caseRecord = (Case) record;
+                        htmlBody += '<tr><td>' + caseRecord.CaseNumber + '</td><td>' + caseRecord.Status + '</td><td>' + caseRecord.Priority + '</td><td>' + caseRecord.Subject + '</td></tr>';
+                    }
+                }
+
+                htmlBody += '</table>';
+                htmlBody += '</body></html>';
+            }
+        }
+
+        for (Account accountMail : [SELECT Id, Email__c FROM Account WHERE Id IN :scope]) {
+            Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+            mail.setToAddresses(new String[]{accountMail.Email__c});
+            mail.setSubject('Account Related Child Records');
+            mail.setHtmlBody(htmlBody);
+            mails.add(mail);
+        }
+
+        Messaging.sendEmail(mails);
+    }
+
+    public void finish(Database.BatchableContext bc) {
+        
+    }
+}
+
