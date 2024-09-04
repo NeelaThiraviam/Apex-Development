@@ -174,4 +174,125 @@ public class OpportunityEmailBatch implements Database.Batchable<SObject> {
         
     }
 }
+-----------------------------------------------------------------------------------------------------------------------------------------
+public class SObjectType {
+    
+    @InvocableVariable(required=true)
+    public String sObj;
+
+}
+
+public class SObjectInvokeMethod {
+    @InvocableMethod(label='SObject Types')
+    public static void invokeBatch(List<SObjectType> sObj) {
+        
+        List<String> sObjList = new List<String>();
+
+        for (SObjectType item : sObj) {
+            sObjList.add(item.sObj);
+        }
+
+        SObjectAccountOwnerEmailNotify batch = new SObjectAccountOwnerEmailNotify(sObjList);
+        Database.executeBatch(batch);
+    }
+
+}
+
+public class SObjectAccountOwnerEmailNotify implements Database.Batchable<SObject> {
+
+    private List<String> sObjList;
+
+    public SObjectAccountOwnerEmailNotify(List<String> sObjList) {
+        this.sObjList = sObjList;
+    }
+
+    public Database.QueryLocator start(Database.BatchableContext bc) {
+        String query = '';
+        
+        if (!sObjList.isEmpty()) {
+            String sObjectType = sObjList[0];
+            
+            if (sObjectType == 'Contact') {
+                query = 'SELECT Id, FirstName, LastName, Email, Phone, AccountId, Account.Email__c FROM Contact WHERE AccountId != null';
+            } else if (sObjectType == 'Opportunity') {
+                query = 'SELECT Id, Name, StageName, CloseDate, Amount, LeadSource, AccountId, Account.Email__c FROM Opportunity WHERE AccountId != null';
+            } else if (sObjectType == 'Case') {
+                query = 'SELECT Id,CaseNumber,Priority, Status, Subject, AccountId, Account.Email__c FROM Case WHERE AccountId != null';
+            }
+        }
+        
+        return Database.getQueryLocator(query);
+    }
+
+    public void execute(Database.BatchableContext bc, List<SObject> scope) {
+        
+        Map<Id, List<SObject>> accountRecordsMap = new Map<Id, List<SObject>>();
+        Map<Id, String> accountEmailMap = new Map<Id, String>();
+        String sObjName = sObjList[0];
+
+        for (SObject record : scope) {
+            Id accountId = (Id)record.get('AccountId');
+            if (!accountRecordsMap.containsKey(accountId)) {
+                accountRecordsMap.put(accountId, new List<SObject>());
+                String accountEmail = '';
+                if (sObjName == 'Contact') {
+                    accountEmail = (String)((Contact)record).Account.Email__c;
+                } else if (sObjName == 'Opportunity') {
+                    accountEmail = (String)((Opportunity)record).Account.Email__c;
+                } else if (sObjName == 'Case') {
+                    accountEmail = (String)((Case)record).Account.Email__c;
+                }
+                accountEmailMap.put(accountId, accountEmail);
+            }
+            accountRecordsMap.get(accountId).add(record);
+        }
+        
+        List<Messaging.SingleEmailMessage> mails = new List<Messaging.SingleEmailMessage>();
+        
+        for (Id account : accountRecordsMap.keySet()) {
+            String htmlBody = '<html><body>';
+            htmlBody += '<table border="1" bgColor="#ADD8E6">';
+            
+            if (sObjName == 'Opportunity') {
+                htmlBody += '<tr><th>Opportunity Name</th><th>Stage Name</th><th>Close Date</th><th>Lead Source</th><th>Amount</th></tr>';
+            } else if (sObjName == 'Contact') {
+                htmlBody += '<tr><th>First Name</th><th>Last Name</th><th>Email</th><th>Phone</th></tr>';
+            } else if (sObjName == 'Case') {
+                htmlBody += '<tr><th>Case Number</th><th>Status</th><th>Priority</th><th>Subject</th></tr>';
+            }
+            
+            for (SObject record : accountRecordsMap.get(account)) {
+                if (sObjName == 'Opportunity' && record instanceof Opportunity) {
+                    Opportunity opp = (Opportunity) record;
+                    htmlBody += '<tr><td>' + opp.Name + '</td><td>' + opp.StageName + '</td><td>' + opp.CloseDate + '</td><td>' + opp.LeadSource + '</td><td>' + opp.Amount + '</td></tr>';
+                } else if (sObjName == 'Contact' && record instanceof Contact) {
+                    Contact contact = (Contact) record;
+                    htmlBody += '<tr><td>' + contact.FirstName + '</td><td>' + contact.LastName + '</td><td>' + contact.Email + '</td><td>' + contact.Phone + '</td></tr>';
+                } else if (sObjName == 'Case' && record instanceof Case) {
+                    Case caseRecord = (Case) record;
+                    htmlBody += '<tr><td>' + caseRecord.CaseNumber + '</td><td>' + caseRecord.Status + '</td><td>' + caseRecord.Priority + '</td><td>' + caseRecord.Subject + '</td></tr>';
+                }
+            }
+            
+            htmlBody += '</table>';
+            htmlBody += '</body></html>';
+            
+            if (accountEmailMap != null) {
+                Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+                mail.setToAddresses(new String[]{accountEmailMap.get(account)});
+                mail.setSubject('Account Related Child Records');
+                mail.setHtmlBody(htmlBody);
+                mails.add(mail);
+            }
+        }
+        
+        if (!mails.isEmpty()) {
+            Messaging.sendEmail(mails);
+        }       
+    }
+
+    public void finish(Database.BatchableContext bc) {
+        
+    }
+}
 
