@@ -1,0 +1,50 @@
+public class AllAccountInBatch implements Database.Batchable<SObject> {
+    
+    public String delayedCronExp = ''; 
+    
+    public Database.QueryLocator start(Database.BatchableContext BC) {
+        
+        String query = 'SELECT Id FROM Account LIMIT 10';
+        return Database.getQueryLocator(query);
+    }
+    
+    public void execute(Database.BatchableContext BC, List<SObject> scope) {
+        
+        Datetime sysTime = System.now().addMinutes(20);
+        
+        delayedCronExp = sysTime.second() + ' ' + sysTime.minute() + ' ' + sysTime.hour() + ' ' + sysTime.day() + ' ' + sysTime.month() + ' ? ' + sysTime.year();
+        
+        System.debug('Delayed Cron Expression :' + delayedCronExp);
+        
+        System.debug('Running Batch Size: ' + scope.size());
+    }
+    
+    public void finish(Database.BatchableContext BC) {       
+        
+        DateTime dt = Datetime.now().addMinutes(15);
+        String cron = '';
+        
+        cron += dt.second() + ' ';       
+        cron += dt.minute() + ' ';     
+        cron += dt.hour() + ' ';       
+        cron += dt.day() + ' ';         
+        cron += dt.month() + ' ';      
+        cron += '? ';                  
+        cron += dt.year();          
+        
+        System.schedule('AllAccountInBatchSchedule_15_' + dt.getTime(), cron, new AllAccountInBatchScheduler());        
+    }
+}
+
+//Batch Run code
+AllAccountInBatch batch = new AllAccountInBatch();
+Database.executeBatch(batch);
+
+//Schedule Batch
+public class AllAccountInBatchScheduler implements Schedulable {
+    public void execute(SchedulableContext SC) {
+        
+        AllAccountInBatch batchJob = new AllAccountInBatch();
+        Database.executeBatch(batchJob);
+    }
+}
