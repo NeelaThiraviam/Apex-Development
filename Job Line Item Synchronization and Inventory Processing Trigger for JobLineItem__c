@@ -1,0 +1,174 @@
+trigger UpdateJobLineItem on JobLineItem__c (before insert, before update, after insert) {
+
+    if(Trigger.isAfter && Trigger.isInsert){
+        Set<Id> jobsIDsToProcessSet = new Set<Id>();
+        for(JobLineItem__c jli : Trigger.new) {
+            jobsIDsToProcessSet.add(jli.Job__c);
+        }
+        for(Job__c job:[SELECT Id, Name, ProcessedJobLineItems__c, ReadyToProcessJobLineItems__c FROM Job__c WHERE Id IN :jobsIDsToProcessSet and ReadyToProcessJobLineItems__c = TRUE]){
+            jobsIDsToProcessSet.add(job.Id);            
+        }
+        if (jobsIDsToProcessSet!=null && jobsIDsToProcessSet.size() > 0 && !system.isFuture() && !system.isBatch() ) {
+            Batch_ProcessJLIToInventory  pb = new Batch_ProcessJLIToInventory (jobsIDsToProcessSet); 
+            Database.executeBatch(pb,200);
+            //CreateInventoryAndDestructionRecs.getJobLineItemsRecords(jobsToProcessList);
+        }
+    }else if(Trigger.isBefore){
+        
+        Map<String, Job_Items__c> jobItemsToInsertMap = new Map<String, Job_Items__c>();
+        Map<String, Product2> product2Map = new Map<String, Product2>();
+        Map<String, Job_Items__c> jobItemMap = new Map<String, Job_Items__c>();        
+        List<JobLineItem__c> jobLineItemsUnmatched  = new List<JobLineItem__c>();
+        List<String> lookupKeyList = new List<String>();
+        List<String> jliKeyList;
+        Set<Id> jobIdSet = new Set<Id>();
+        Set<String> JLINameSet = new Set<String>();
+        Integer jobLineItemNumber;
+        String jobNumber,jliNumber;
+        String jobLineItemKeyValidationPattern = '([A-Z]{2}[0-9]{2}-[0-9]{6}-[0-9]{4}-[0]{3})(|-DUP)';
+        String productKey;
+        Boolean unMatchedExist = false;
+        Boolean foundJobChange = false;
+        Boolean generateJLIKey = true;
+        Boolean updateJob = false;
+        for(JobLineItem__c jli : Trigger.new) {
+            lookupKeyList.add(jli.JobItemLookupKey__c);
+            if (!jobIdSet.contains(jli.Job__c)){ 
+                jobIdSet.add(jli.Job__c);
+            }
+        }
+        Map<Id, Job__c> jobMap = new Map<Id, Job__c>([
+            SELECT Id, Name, No_of_Printed_Labels__c, Opportunity__c
+            FROM Job__c 
+            WHERE Id IN :jobIdSet
+        ]);
+        for(Job_items__c JI: [SELECT Id, JobItemLookupKey__c, Name, ProductCode__c, Product__c, Job__c, Product_Family__c, CreatedDate FROM Job_Items__c WHERE JobItemLookupKey__c IN :lookupKeyList ORDER BY CreatedDate]){
+            if(!jobItemMap.containsKey(ji.JobItemLookupKey__c)){
+                jobItemMap.put(ji.JobItemLookupKey__c, ji);
+            }
+        }
+        for (JobLineItem__c jli : Trigger.new) {            
+            if (Trigger.isInsert) { 
+                if (jli.EquipmentTypeDerived__c != null) {
+                    if (jli.EquipmentTypeDerived__c.length() > 0) jli.EquipmentType__c = jli.EquipmentTypeDerived__c;
+                }
+                if (jli.EquipmentSubTypeDerived__c != null) {
+                    if (jli.EquipmentSubTypeDerived__c.length() > 0) jli.EquipmentSubType__c = jli.EquipmentSubTypeDerived__c;
+                }
+            }else if(Trigger.isUpdate){                
+                if (jli.Job__c <> trigger.oldMap.get(jli.Id).Job__c) {
+                    jli.Name= 'A';
+                    foundJobChange = true;
+                }
+            }       
+            //---START---Sync JLI With JobItem--//     
+            if (JobItemMap.containsKey(jli.JobItemLookupKey__c)) {
+                Job_Items__c ji = JobItemMap.get(jli.JobItemLookupKey__c);
+                jli.Job_Item_Key__c = ji.Id;
+                jli.SQLProductName__c = ji.Product__c;
+                jli.SQLProductCode__c = ji.ProductCode__c;
+                jli.SQLProductFamily__c = ji.Product_Family__c;                
+            } else {
+                if(!unMatchedExist){
+                    unMatchedExist= true;
+                    for (Product2 product2 : [SELECT Id, Description,Family, Name, ProductCode  FROM Product2]) {
+                        product2Map.put(product2.Name, product2);
+                    }
+                }
+                jobLineItemsUnmatched.add(jli);
+                jliKeyList = jli.JobItemLookupKey__c.Split('-');
+                if(jliKeyList.size()<=3){
+                    
+                    System.debug('::::::jliKeyList[jliKeyList.size()-1] ::::::'+jliKeyList[jliKeyList.size()-1]);
+                    productKey = jliKeyList[jliKeyList.size()-1] ;
+                    
+                }else{
+                    
+                    String keyvalues = jli.JobItemLookupKey__c.SubString(jli.JobItemLookupKey__c.indexOf('-'),jli.JobItemLookupKey__c.length());
+                    System.debug('::::::::keyvalues -1::::::::'+keyvalues );
+                    keyvalues  = keyvalues.SubString(keyvalues.indexOf('-')+1,keyvalues.length());
+                    System.debug('::::::::keyvalues-2::::::::'+keyvalues);
+                    keyvalues = keyvalues.SubString(keyvalues.indexOf('-')+1,keyvalues.length());
+                    System.debug('::::::::keyvalues-3::::::::'+keyvalues);
+                    productKey = keyvalues;                    
+                }
+                if (product2Map.containsKey(productKey)) {                
+                    Product2 product2 = product2Map.get(productKey);                    
+                    Job_Items__c jobItem = new Job_Items__c();
+                    jobItem.Date__c = date.today();
+                    jobItem.Job__c = jli.Job__c;
+                    jobItem.Ops_Quantity__c = 0;
+                    jobItem.Product__c = product2.Name;
+                    jobItem.Product2__c = product2.Id;
+                    jobItem.ProductCode__c = product2.ProductCode;
+                    jobItem.Product_Description__c = product2.Description;
+                    jobItem.Product_Family__c = product2.Family;
+                    // Only add unique Job Items
+                    if (!jobItemsToInsertMap.containsKey(jli.JobItemLookupKey__c)) {
+                        jobItemsToInsertMap.put(jli.JobItemLookupKey__c, jobItem);
+                    }
+                } else {
+                    system.debug('CreateJobItemLink.trigger->Unable to find \'' + 
+                    productKey + '\' Product in product2Map');
+                }
+            } 
+            //---END---Sync JLI With JobItem--//      
+            //--START---JLI Name--//
+            generateJLIKey = true;
+            if (!jli.CreatedByAPI__c) {                
+                if (String.isNotBlank(jli.Name) && jli.Name.length() > 0) {
+                    Pattern keyPattern = Pattern.compile(jobLineItemKeyValidationPattern);
+                    Matcher keyMatcher = keyPattern.matcher(jli.Name);
+                    if (keyMatcher.matches()) {                        
+                        jobLineItemNumber = Integer.valueOf(jli.Name.mid(12, 4));
+                        jobNumber = jli.Name.mid(0, 11);
+                        if ((jobLineItemNumber >= JobMap.get(jli.Job__c).No_of_Printed_Labels__c) || (jli.job_Name__c <> jobNumber)) {
+                            if(JLINameSet!=null && JLINameSet.contains(jli.Name) && JLI.SQLProductFamily__c!='Recycling'){
+                                JLI.addError('Duplicate record found within the new list');
+                            }else{
+                                JLINameSet.add(jli.name);
+                                generateJLIKey = false;
+                                updateJob = true;
+                            }
+                        }                        
+                    } 
+                }
+            }
+            if(generateJLIKey==true){
+                JobMap.get(jli.Job__c).No_of_Printed_Labels__c++;
+                jliNumber = String.valueOf(JobMap.get(jli.Job__c).No_of_Printed_Labels__c);
+                jliNumber = jliNumber.leftPad(4);
+                jliNumber = jliNumber.replace(' ', '0');
+                if(jli.Skip_JLI_Key__c == false) jli.Name = jli.Job_Name__c + '-' + jliNumber + '-000'; 
+                jli.Opportunity__c = jobMap.get(jli.Job__c).Opportunity__c;
+                if(JLINameSet!=null && JLINameSet.contains(jli.Name)){
+                    JLI.addError('Duplicate record found within the new list');
+                }else{
+                    JLINameSet.add(jli.name);
+                }
+            }
+            //--END---JLI Name--//         
+        }
+        
+        Database.SaveResult[] JIList_result = Database.Insert(jobItemsToInsertMap.values(),false);
+        Integer i = 0;
+        for(Database.SaveResult res: JIList_result){        
+            if(!res.isSuccess()){
+                if(res.getErrors()[0].getMessage().contains('DUPLICATE_VALUE, duplicate value found: Job_Item_Lookup_Key_Unique__c duplicates value on record with id:')){
+                    jobLineItemsUnmatched.remove(i);
+                }
+            }
+            i++;
+        }
+        for (JobLineItem__c jli : jobLineItemsUnmatched) {
+            if (jobItemsToInsertMap.containsKey(jli.JobItemLookupKey__c) && jobItemsToInsertMap.get(jli.JobItemLookupKey__c).Id!=null) {
+                Job_Items__c JI = jobItemsToInsertMap.get(jli.JobItemLookupKey__c);
+                jli.Job_Item_Key__c = ji.Id;
+                jli.SQLProductName__c = ji.Product__c;
+                jli.SQLProductCode__c = ji.ProductCode__c;
+                jli.SQLProductFamily__c = ji.Product_Family__c;
+            }
+        }
+        if (updateJob) update jobMap.values();
+    }    
+}
